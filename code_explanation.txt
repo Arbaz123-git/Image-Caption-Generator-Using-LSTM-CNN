@@ -1,0 +1,715 @@
+Image_Caption.ipynb 
+
+
+# IMPORTING ALL THE NECESSARY PACKAGES 
+
+import string # The string module provides a collection of string constants.
+import numpy as np # NumPy is a library for numerical operations in Python. It's commonly used for handling arrays and mathematical operations.
+
+from PIL import Image
+# PIL (Python Imaging Library) - Image:
+#The Image module from the PIL library is used for opening, manipulating, and saving many different image file formats.
+
+import os
+# The os module provides a way to interact with the operating system. In this context, it might be used for file and directory operations.
+
+from pickle import dump, load
+# The pickle module is used for serializing and deserializing Python objects. It's often used for saving and loading data.
+
+from keras.applications.xception import Xception, preprocess_input
+# Importing the Xception pre-trained model from Keras Applications. This model can be used for various computer vision tasks.
+
+from keras.preprocessing.image import load_img, img_to_array
+# Importing functions for loading and preprocessing images using Keras.
+
+from keras.preprocessing.text import Tokenizer
+# Importing the Tokenizer class for text tokenization.
+
+from keras.preprocessing.sequence import pad_sequences
+# Importing functions for padding sequences. This is often used when dealing with variable-length input data.
+
+from tensorflow.keras.utils import to_categorical
+# Importing the to_categorical function for one-hot encoding categorical variables.
+
+from keras.utils import to_categorical
+ 
+
+#from keras.layers.merge import add
+from tensorflow.keras.layers import add
+# Importing the add function for merging layers.
+
+from keras.models import Model, load_model
+# Importing the Model and load_model classes for building and loading Keras models.
+
+from keras.layers import Input, Dense, LSTM, Embedding, Dropout
+# Importing various layers like Input, Dense, LSTM, Embedding, Dropout for building neural network architectures using Keras.
+
+# small library for seeing the progress of loops
+from tqdm import tqdm_notebook as tqdm
+tqdm().pandas()
+
+
+
+# Loading a text file into memory
+def load_doc(filename):
+    # Opening the file as read only
+    file = open(filename, 'r')
+    text = file.read()
+    file.close()
+    return text
+# function loads a text file into memory. It takes a filename as an argument, opens the 
+# file in read-only mode, reads its content, and then closes the file before returning the text.
+
+# get all imgs with their captions
+def all_img_captions(filename):
+    file = load_doc(filename)
+    captions = file.split('\n')
+    descriptions = {}
+    for caption in captions[:-1]:
+        img, caption = caption.split('\t')
+        if img[:-2] not in descriptions:
+            descriptions[img[:-2]] = [ caption ]
+        else:
+            descriptions[img[:-2]].append(caption)
+
+    return descriptions
+
+# function reads a file containing image names and their corresponding captions. It returns a
+# dictionary where each image name is associated with a list of its captions.
+
+# Data cleaning- lower casing, removing punctuations and words containing numbers
+
+def cleaning_text(captions):
+    table = str.maketrans('','',string.punctuation)
+    for img,caps in captions.items():
+        for i,img_caption in enumerate(caps):
+
+            img_caption.replace("-"," ")
+            desc = img_caption.split()
+
+            #converts to lowercase
+            desc = [word.lower() for word in desc]
+            # remove punctuation from each token
+            desc = [word.translate(table) for word in desc]
+            #remove hanging 's and a
+            desc = [word for word in desc if(len(word)>1)]
+            #remove tokens with numbers in them
+            desc = [word for word in desc if(word.isalpha())]
+            #convert back to string
+
+            img_caption = ' '.join(desc)
+            captions[img][i] = img_caption
+
+    return captions
+
+# function performs text cleaning on the captions. It converts all text to lowercase,
+# removes punctuation, words containing numbers, and tokens with a length less than or equal to 1.
+
+def text_vocabulary(descriptions):
+    # build vocabulary of all unique words
+    vocab = set()
+
+    for key in descriptions.keys():
+        [vocab.update(d.split()) for d in descriptions[key]]
+
+    return vocab
+
+# function builds a vocabulary of all unique words present in the captions.    
+
+# All descriptions in one file
+def save_descriptions(descriptions, filename):
+    lines = list()
+    for key, desc_list in descriptions.items():
+        for desc in desc_list:
+            lines.append(key + '\t' + desc )
+    data = "\n".join(lines)
+    file = open(filename, "w")
+    file.write(data)
+    file.close()
+
+# function saves the preprocessed descriptions into a file. It concatenates the image
+# name and its cleaned caption, separated by a tab, and writes each line to the file.
+
+
+
+# Set these path according to project folder in your system
+
+dataset_text = "/content/drive/MyDrive/ML/Flickr8k_text"
+dataset_images = "/content/drive/MyDrive/ML/Flickr8k_Dataset/Flicker8k_Dataset"
+
+# variables store the paths to the folders containing the text data (Flickr8k_text) 
+# and image data (Flickr8k_Dataset/Flicker8k_Dataset).
+
+#we prepare our text data
+filename = dataset_text + "/" + "Flickr8k.token.txt"
+#Loading the file that contains all data
+#mapping them into descriptions dictionary img to 5 captions
+descriptions = all_img_captions(filename)
+print("Length of descrptions =" , len(descriptions))
+
+# cleaning the descriptions
+clean_descriptions = cleaning_text(descriptions)
+
+# This section loads the descriptions from the file Flickr8k.token.txt, associates
+# each image with its captions, and then cleans the text data using the cleaning_text function.
+
+#building vocabulary
+vocabulary = text_vocabulary(clean_descriptions)
+print("Length of vocabulary = ", len(vocabulary))
+
+# The code builds a vocabulary from the cleaned descriptions, and the length of the 
+# vocabulary is printed.
+
+#saving each descriptons to file
+save_descriptions(clean_descriptions, "/content/drive/MyDrive/ML/descriptions.txt")
+
+# The preprocessed descriptions are saved to a file named descriptions.txt.
+
+
+
+
+# EXTRACTING THE FEATURE VECTOR FROM ALL IMAGES 
+
+
+def extract_features(directory):
+    model = Xception( include_top=False, pooling='avg')
+    features = {}
+    for img in tqdm(os.listdir(directory)):
+        filename = directory + "/" + img
+        image = Image.open(filename)
+        image = image.resize((299,299))
+        image = np.expand_dims(image, axis=0)
+        #image = preprocess_input(image)
+        image = image/127.5
+        image = image - 1.0
+
+        feature = model.predict(image)
+        features[img] = feature
+
+    return features
+
+# This function extracts image features using the Xception model for all images in a specified directory.
+
+# Xception Model:
+
+# The Xception model is loaded with include_top=False to exclude the fully connected layers at the top. 
+# pooling='avg' specifies global average pooling, resulting in a 2048-dimensional feature vector for 
+# each image.
+#Image Processing:
+
+# For each image in the specified directory:
+# The image is opened and resized to (299, 299) pixels.
+# It's then preprocessed by expanding the dimensions, scaling the pixel values, and centering them
+# around zero.
+# Feature Extraction:
+
+# The preprocessed image is passed through the Xception model to obtain the 2048-dimensional feature 
+# vector.
+# The feature vector is stored in the features dictionary with the image filename as the key.
+# Return:
+
+# The function returns the features dictionary containing image filenames as keys and their 
+# corresponding feature vectors.
+
+
+
+# 2048 feature vector   
+features = extract_features(dataset_images)
+dump(features, open("/content/drive/MyDrive/ML/features.p","wb"))    
+
+# The extract_features function is called on the images in the dataset_images directory, and the 
+# resulting feature dictionary is saved to a file named features.p using the pickle module
+# (dump function).
+
+
+
+features = load(open("/content/drive/MyDrive/ML/features.p","rb"))     
+
+# This line loads the previously saved feature dictionary from the file features.p using the
+# pickle module (load function).
+
+
+# LOADING DATASET FOR TRAINING THE MODEL 
+
+
+# Load the data
+def load_photos(filename):
+    file = load_doc(filename)
+    photos = file.split("\n")[:-1]
+    return photos
+
+# This function loads a list of photo filenames from a specified file. It reads the content of the file,
+# splits it into lines, and removes the last empty line. The resulting list contains the filenames of 
+# photos used in the training set.
+
+def load_clean_descriptions(filename, photos):
+    # Loading clean_descriptions
+    file = load_doc(filename)
+    descriptions = {}
+    for line in file.split("\n"):
+
+        words = line.split()
+        if len(words)<1:
+            continue
+
+        image, image_caption = words[0], words[1:]
+
+        if image in photos:
+            if image not in descriptions:
+                descriptions[image] = []
+            desc = '<start> ' + " ".join(image_caption) + ' <end> '
+            descriptions[image].append(desc)
+
+    return descriptions
+
+# This function loads and cleans the descriptions for the photos in the training set. It reads
+# the content of the file, splits it into lines, and processes each line. For each line, it
+# extracts the image filename and its corresponding caption. If the image is in the list of
+# training photos, it cleans the caption by adding <start> at the beginning and <end> at the 
+# end, then appends it to the descriptions dictionary.
+
+
+def load_features(photos):
+    # Loading all features
+    all_features = load(open("/content/drive/MyDrive/ML/features.p",'rb'))
+    #selecting only needed features
+    features = {k:all_features[k] for k in photos}
+    return features
+
+# This function loads the pre-extracted features for the photos in the training set. It loads
+# all features from the file using pickle and then selects only the features corresponding to
+# the training photos.
+
+filename = dataset_text + "/" + "Flickr_8k.trainImages.txt"
+
+# train = loading_data(filename)
+train_imgs = load_photos(filename)
+train_descriptions = load_clean_descriptions("/content/drive/MyDrive/ML/descriptions.txt", train_imgs)
+train_features = load_features(train_imgs)
+
+# This section uses the previously defined functions to load the list of training photo filenames (train_imgs),
+# the cleaned descriptions (train_descriptions), and the pre-extracted features (train_features) for the training
+# set.
+
+
+# TOKENIZING THE VOCABULARY 
+
+#converting dictionary to clean list of descriptions
+def dict_to_list(descriptions):
+    all_desc = []
+    for key in descriptions.keys():
+        [all_desc.append(d) for d in descriptions[key]]
+
+    return all_desc
+
+# This function converts the dictionary of image filenames and their associated cleaned captions into a
+# list of all captions. It iterates through each key in the dictionary and appends each caption to the 
+# all_desc list.
+
+
+#creating tokenizer class
+#this will vectorise text corpus
+#each integer will represent token in dictionary
+
+from keras.preprocessing.text import Tokenizer
+
+def create_tokenizer(descriptions):
+    desc_list = dict_to_list(descriptions)
+    tokenizer = Tokenizer()
+    tokenizer.fit_on_texts(desc_list)
+    return tokenizer
+
+# This function takes the cleaned descriptions, converts them into a list using dict_to_list,
+# and then creates a Keras Tokenizer. The fit_on_texts method is used to fit the tokenizer on the
+# list of captions, assigning a unique integer index to each word.
+
+
+
+tokenizer = create_tokenizer(train_descriptions)
+
+# the function is applied to the training descriptions (train_descriptions) to create a tokenizer.
+
+
+dump(tokenizer, open('/content/drive/MyDrive/ML/tokenizer.p','wb'))
+
+# The resulting tokenizer is saved to a file named tokenizer.p using the pickle module.
+
+vocab_size = len(tokenizer.word_index) + 1
+
+# This line calculates the vocabulary size by getting the length of the word index from the tokenizer
+# and adding 1. The additional 1 is for the index 0, which is reserved.
+
+vocab_size
+
+
+
+#calculate maximum length of descriptions
+def max_length(descriptions):
+    desc_list = dict_to_list(descriptions)
+    return max(len(d.split()) for d in desc_list)
+
+# This function takes a dictionary of image filenames and their associated cleaned captions
+# (descriptions). It first converts the descriptions into a list using dict_to_list. Then, it
+# uses a generator expression to calculate the length of each cleaned caption after splitting it
+# into words (len(d.split())), and finally, it returns the maximum length among all captions using
+# the max function.
+
+max_length = max_length(descriptions)
+
+# the function is called with the descriptions dictionary, and the result is assigned to the variable
+# max_length.
+
+max_length
+
+# The variable max_length now holds the maximum number of words present in any single cleaned caption
+# in the dataset. This information is useful when designing a neural network for image captioning, as
+# it helps in determining the appropriate sequence length for processing the captions during training
+# and generation. It ensures that the model can handle captions of varying lengths in the dataset.
+
+
+# CREATE DATA GENERATOR 
+
+#create input-output sequence pairs from the image description.
+#data generator, used by model.fit_generator()
+def data_generator(descriptions, features, tokenizer, max_length):
+    while 1:
+        for key, description_list in descriptions.items():
+            #retrieve photo features
+            feature = features[key][0]
+            input_image, input_sequence, output_word = create_sequences(tokenizer, max_length, description_list, feature)
+            yield ([input_image, input_sequence], output_word)
+
+# This function is a generator that yields batches of training data indefinitely (while 1:).
+# It iterates through each image (key) and its associated cleaned captions (description_list) in the descriptions dictionary.
+# For each image, it retrieves the corresponding image feature from the features dictionary.
+# It then calls the create_sequences function to generate input sequences and output words for the image captions.
+# The generator yields batches containing input features (input_image and input_sequence) and output words (output_word).
+
+def create_sequences(tokenizer, max_length, desc_list, feature):
+    X1, X2, y = list(), list(), list()
+    # walk through each description for the image
+    for desc in desc_list:
+        # encode the sequence
+        seq = tokenizer.texts_to_sequences([desc])[0]
+        # split one sentence into multiple X,y pairs
+        for i in range(1, len(seq)):
+            #split into input and output pair
+            in_seq, out_seq = seq[:i], seq[i]
+            # pad input sentence
+            in_seq = pad_sequences([in_seq], maxlen=max_length)[0]
+            # encode output sequence
+            out_seq = to_categorical([out_seq], num_classes=vocab_size)[0]
+            # store
+            X1.append(feature)
+            X2.append(in_seq)
+            y.append(out_seq)
+
+    return np.array(X1), np.array(X2), np.array(y)
+
+# This function takes a tokenizer, the maximum sequence length (max_length), a list of cleaned captions (desc_list), and the 
+# image feature (feature).
+# It encodes each cleaned caption into sequences of integers using the tokenizer.
+# For each encoded sequence, it creates multiple input-output pairs by splitting the sequence.
+# It pads the input sequence to the maximum length (max_length).
+# The output sequence is one-hot encoded using to_categorical.
+# The function returns three arrays: X1 (image features), X2 (padded input sequences), and y (one-hot encoded output sequences).
+
+#You can check the shape of the input and output for your model
+[a,b],c = next(data_generator(train_descriptions, features, tokenizer, max_length))
+a.shape, b.shape, c.shape
+
+# This code checks the shape of the input and output for the model by generating one batch of data using the data generator.
+# a is the image features, b is the padded input sequences, and c is the one-hot encoded output sequences.
+# The output shows that a has a shape of (batch_size, 2048), b has a shape of (batch_size, max_length), and c has a shape of 
+# (batch_size, vocab_size). 
+
+
+#((47, 2048), (47, 32), (47, 7577))
+
+
+
+# DEFINING THE CNN-RNN MODEL 
+
+
+from tensorflow.keras.utils import plot_model
+
+# define the captioning model
+def define_model(vocab_size, max_length):
+
+    # features from the CNN model squeezed from 2048 to 256 nodes
+    inputs1 = Input(shape=(2048,))
+    fe1 = Dropout(0.5)(inputs1)
+    fe2 = Dense(256, activation='relu')(fe1)
+
+    # LSTM sequence model
+    inputs2 = Input(shape=(max_length,))
+    se1 = Embedding(vocab_size, 256, mask_zero=True)(inputs2)
+    se2 = Dropout(0.5)(se1)
+    se3 = LSTM(256)(se2)
+
+    # Merging both models
+    decoder1 = add([fe2, se3])
+    decoder2 = Dense(256, activation='relu')(decoder1)
+    outputs = Dense(vocab_size, activation='softmax')(decoder2)
+
+    # tie it together [image, seq] [word]
+    model = Model(inputs=[inputs1, inputs2], outputs=outputs)
+    model.compile(loss='categorical_crossentropy', optimizer='adam')
+
+    # summarize model
+    print(model.summary())
+    plot_model(model, to_file='/content/drive/MyDrive/ML/model.png', show_shapes=True)
+
+    return model
+
+# Model Architecture:
+
+# Image Feature Processing:
+# The model takes two inputs: one for image features and one for sequences of words.
+# The image features (2048-dimensional) are passed through a dropout layer with a dropout rate of 0.5 to prevent overfitting.
+# The dropout layer output is then connected to a dense layer with 256 nodes and a ReLU activation function.
+
+# Sequence Processing (LSTM):
+# The sequences of words (input sentences) are embedded using an embedding layer with a vocabulary size of vocab_size,
+# embedding dimension of 256, and masking zero values.
+# The embedded sequences go through a dropout layer with a dropout rate of 0.5.
+# The dropout layer output is then processed by an LSTM layer with 256 units.
+
+# Merging Image and Sequence Processing:
+# The outputs from the image and sequence processing are merged using an element-wise addition (add layer).
+# The merged output is then passed through another dense layer with 256 nodes and a ReLU activation function.
+
+# Output Layer:
+# The final output layer is a dense layer with a softmax activation function, producing a probability distribution over
+# the vocabulary for the next word in the sequence.
+
+# Model Compilation:
+# The model is compiled using categorical cross-entropy as the loss function and the Adam optimizer.
+
+# Model Summary and Visualization:
+# The model summary is printed, displaying the architecture and the number of parameters.
+# The plot_model function is used to generate a visualization of the model architecture, and the plot is saved as an image file (model.png).
+
+# The model.summary() prints a summary of the model architecture, layer types, and the number of parameters.
+# plot_model generates a visual representation of the model's architecture and saves it as an image file (model.png).
+
+# The function returns the compiled model.
+
+
+# TRAINING SECTION
+
+# train our model 
+
+print('Dataset: ', len(train_imgs))
+print('Descriptions: train=', len(train_descriptions))
+print('Photos: train=', len(train_features))
+print('Vocabulary Size:', vocab_size)
+print('Description Length: ', max_length)
+
+# These lines print information about the dataset, including the number of training images (train_imgs), the number
+# of cleaned descriptions (train_descriptions), the number of training photos (train_features), the vocabulary size,
+# and the maximum description length.
+
+model = define_model(vocab_size, max_length)
+print(model,'model')
+
+# The code defines the image captioning model using the define_model function.
+# The model summary is printed.
+
+
+epochs = 10
+steps = len(train_descriptions)
+
+# making a directory model to save our models
+os.mkdir('/content/drive/MyDrive/ML/models5')
+for i in range(epochs):
+    generator = data_generator(train_descriptions, train_features, tokenizer, max_length)
+    model.fit_generator(generator, epochs=1, steps_per_epoch=steps, verbose=1)
+    model.save("/content/drive/MyDrive/ML/models5/model_" + str(i) + ".h5")
+
+# The code specifies the number of epochs (epochs) and the number of steps per epoch (steps), which is set to the length of train_descriptions.
+# A directory named models5 is created to save the trained models.
+# A loop is used to iterate through each epoch:
+# A data generator is created using the data_generator function.
+# The fit_generator method is used to train the model for one epoch using the generated data.
+# After each epoch, the model is saved in the models5 directory with a filename that includes the epoch number ("model_" + str(i) + ".h5").
+
+
+
+
+
+testing_caption_generator.py 
+
+
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
+from keras.applications.xception import Xception
+from keras.models import load_model
+from pickle import load
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+import argparse
+# standard library module in Python for parsing command-line arguments. It allows you to easily write
+#  user-friendly command-line interfaces for your scripts or programs.
+
+ap = argparse.ArgumentParser()
+# This line creates an ArgumentParser object named ap. The ArgumentParser class in the argparse module 
+# is used to define and parse command-line arguments.
+
+ap.add_argument('-i', '--image', required=True, help="Image Path")
+# This line adds a command-line argument to the parser:
+# -i is the short form of the argument.
+# --image is the long form of the argument.
+# required=True specifies that this argument must be provided by the user.
+# help="Image Path" provides a description of the argument that will be displayed when the user asks for help.
+
+args = vars(ap.parse_args())
+# This line parses the command-line arguments provided by the user and stores them in the args variable.
+#  The parse_args() method parses the command-line arguments, and vars() converts the resulting Namespace
+#  object to a dictionary.
+
+img_path = args['image']
+# This line extracts the value associated with the 'image' key from the args dictionary and assigns it to the
+#  variable img_path. This value represents the path to the image file provided by the user as a command-line argument. 
+
+# img_path = '/content/drive/MyDrive/ML/Flickr8k_Dataset/Flicker8k_Dataset/111537222_07e56d5a30.jpg'
+
+
+def extract_features(filename, model):
+        try:
+            image = Image.open(filename)
+            
+        except:
+            print("ERROR: Couldn't open image! Make sure the image path and extension is correct")
+        image = image.resize((299,299))
+        image = np.array(image)
+        # for images that has 4 channels, we convert them into 3 channels
+        if image.shape[2] == 4: 
+            image = image[..., :3]
+        image = np.expand_dims(image, axis=0)
+        image = image/127.5
+        image = image - 1.0
+        feature = model.predict(image)
+        return feature
+
+# Try-Except Block:
+
+# The function begins with a try-except block. It attempts to open the image file specified by the filename parameter using the Image.open() method from the PIL (Python Imaging Library) module. If there's an exception (e.g., if the file doesn't exist or is not a valid image file), it prints an error message.
+# Image Preprocessing:
+
+# If the image is successfully opened, it is resized to (299, 299) pixels. This is a common preprocessing step, especially when working with pre-trained image classification models like Xception.
+# The image is then converted to a NumPy array using np.array(image). The array representation is necessary for further processing.
+# Handling 4-Channel Images:
+
+# If the image has four channels (RGBA), the code keeps only the first three channels, converting it to a standard three-channel (RGB) image.
+# Array Manipulation:
+
+# The image array is expanded along the first axis, adding an extra dimension to make it suitable for input to the neural network model.
+# Normalization:
+
+# The pixel values are normalized by dividing by 127.5 and then subtracting 1.0. This normalization is often applied to bring the pixel values into a range suitable for the model.
+# Feature Extraction:
+
+# The pre-trained model (model) is then used to predict features from the preprocessed image. The extracted features are returned by the function.
+
+def word_for_id(integer, tokenizer):
+ for word, index in tokenizer.word_index.items():
+     if index == integer:
+         return word
+ return None
+
+# Function Purpose:
+# This function is designed to retrieve the word associated with a given integer index in a tokenizer.
+# Parameters:
+
+# integer: The integer index for which you want to find the corresponding word.
+# tokenizer: The tokenizer object that contains the mapping between words and their integer indices.
+# Iteration through Tokenizer Items:
+
+# The function iterates through each item in the word_index attribute of the tokenizer. This attribute is a dictionary where words are keys, and their corresponding integer indices are values.
+# Checking for Matching Index:
+
+# For each iteration, the function checks if the integer index in the current iteration matches the input integer.
+# Returning the Word:
+
+# If a match is found, the function returns the corresponding word.
+# If no match is found after iterating through all items, the function returns None.
+
+
+def generate_desc(model, tokenizer, photo, max_length):
+    in_text = 'start'
+    for i in range(max_length):
+        sequence = tokenizer.texts_to_sequences([in_text])[0]
+        sequence = pad_sequences([sequence], maxlen=max_length)
+        pred = model.predict([photo,sequence], verbose=0)
+        pred = np.argmax(pred)
+        word = word_for_id(pred, tokenizer)
+        if word is None:
+            break
+        in_text += ' ' + word
+        if word == 'end':
+            break
+    return in_text
+
+# Parameters:
+
+# model: The trained model used for generating descriptions.
+# tokenizer: The tokenizer used for converting text to sequences and vice versa.
+# photo: The input image features used as a seed for generating the description.
+# max_length: The maximum length of the generated description.
+# Initialization:
+
+# The variable in_text is initialized with the string 'start'. This serves as the initial seed text for generating the description.
+# Generating Text Sequence:
+
+# The function enters a loop that iterates for a maximum of max_length times.
+# Inside the loop:
+# The current value of in_text is converted to a sequence of integers using the tokenizer (tokenizer.texts_to_sequences).
+# The sequence is padded to match the maximum length (pad_sequences).
+# The model is used to predict the next word given the input photo and the current sequence.
+# The predicted word is determined as the word with the highest probability (argmax of the prediction).
+# The predicted word is retrieved using the word_for_id function.
+# The predicted word is appended to the in_text sequence.
+# If the predicted word is 'end', the loop is terminated.
+# Returning the Generated Text:
+
+# The function returns the generated text sequence.
+
+
+#path = 'Flicker8k_Dataset/111537222_07e56d5a30.jpg'
+max_length = 32
+tokenizer = load(open("/content/drive/MyDrive/ML/tokenizer.p","rb"))
+model = load_model('/content/drive/MyDrive/ML/models5/model_9.h5')
+xception_model = Xception(include_top=False, pooling="avg")
+
+photo = extract_features(img_path, xception_model)
+img = Image.open(img_path)
+
+description = generate_desc(model, tokenizer, photo, max_length)
+print("\n\n")
+print(description)
+plt.imshow(img)
+
+# Setting Parameters:
+
+# max_length: The maximum length of the generated description sequence.
+# tokenizer: Loading the tokenizer from a saved file using load from the pickle module.
+# model: Loading the pre-trained image captioning model from a saved file using load_model from Keras.
+# xception_model: Creating an instance of the Xception model for feature extraction.
+# Extracting Features:
+
+# img_path is assumed to be the path to an image file.
+# photo is obtained by extracting features from the image using the Xception model (extract_features function).
+# Loading Image:
+
+# img is the image loaded using Image.open from the PIL module.
+# Generating Description:
+
+# generate_desc function is called with the loaded model, tokenizer, extracted photo features, and the maximum length.
+# The generated description is stored in the variable description.
+# Printing and Displaying Image:
+
+# Two newline characters (\n\n) are printed for separation.
+# The generated description is printed.
+# The image is displayed using plt.imshow.
