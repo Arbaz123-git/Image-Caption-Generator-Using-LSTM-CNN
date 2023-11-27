@@ -3,11 +3,14 @@ Image caption generator is a process of recognizing the context of an image and 
 
 For proper understanding go through Image_Caption.ipynb file there I have mentioned each and every points in detail. 
 
+For testing Image Caption generator testing_caption_generator.py file is there. 
+
 For downloading the dataset click to this link:
 Images:
 https://github.com/jbrownlee/Datasets/releases/download/Flickr8k/Flickr8k_Dataset.zip
 
 Images with their associate captions:
+
 https://github.com/jbrownlee/Datasets/releases/download/Flickr8k/Flickr8k_text.zip
 
 
